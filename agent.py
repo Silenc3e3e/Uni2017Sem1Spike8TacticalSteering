@@ -46,7 +46,7 @@ class Agent(object):
 
     #flee information
     panicDist = 10
-    hiderange = 35
+    hiderange = 50
 
     #wander variables
     wander_dist = 8.25
@@ -171,7 +171,10 @@ class Agent(object):
             force = self.groupForce(delta)
         else:
             force = self.groupForce(delta)
-        force += self.AvoidEnvironmentForce() #additive avoid walls
+        #avoid walls
+        #force += self.AvoidEnvironmentForce() #additive avoid walls
+        #force = self.AvoidEnvironmentRedirect(force)
+
         forcewindow = self.windowEdge()
         if forcewindow[1] > 0:
             #print ("forcewindow %s prop = %s" % (str(forcewindow[0]) , str(forcewindow[1])))
@@ -271,6 +274,20 @@ class Agent(object):
             egi.circle(self.pos, Agent.seperationRange * Agent.floatScale)
             egi.green_pen()
             egi.circle(self.pos, Agent.alignmentRange * Agent.floatScale)
+
+            if self == Agent.world.hunter:
+                #draw panic dist and hide dist
+                egi.aqua_pen()
+                egi.circle(self.pos, Agent.panicDist * Agent.floatScale)
+                egi.circle(self.pos, (Agent.panicDist + Agent.hiderange) * Agent.floatScale)
+                for hidepos in self.hunterHidePositions:
+                    egi.aqua_pen()
+                    egi.line_by_pos(self.pos, hidepos[0])
+
+                #debugging
+                #TODO REMOVE
+                egi.orange_pen()
+                egi.line_by_pos(self.pos, self.pos + self.AvoidEnvironmentRedirect(self.force))
     def speed(self):
         return self.vel.length()
 
@@ -294,15 +311,22 @@ class Agent(object):
 
     def flee(self, hunter_pos, delta):
         ''' move away from hunter position '''
-        groupForced = self.groupForce(delta)
         hunterDist = (hunter_pos - self.pos).length()
         scaledPanicDist = Agent.panicDist * Agent.floatScale
         if hunterDist < scaledPanicDist:
             desired_vel = (-((hunter_pos - self.pos).normalise() * (Agent.max_speed * Agent.floatScale))) - self.vel
-            proportion = hunterDist / scaledPanicDist
+            #proportion = hunterDist / scaledPanicDist
 
-            return (desired_vel * (1 - proportion) + groupForced * (proportion))
-
+            return (desired_vel )#* (1 - proportion) + groupForced * (proportion)) <--Removed due to hiding force now in effect
+        
+        groupForced = self.groupForce(delta)
+        scaledHideRange = Agent.hiderange * Agent.floatScale
+        if hunterDist < scaledPanicDist + scaledHideRange:
+            hideforce = self.HideFromHunter()
+            if hideforce[0]:
+                proportionhunter = (hunterDist - scaledPanicDist) / scaledHideRange #based on distance from hunter
+                #proportionhider = hideforce[1] #based on distance from hidepos
+                return hideforce[0] * (hideforce[1] + (1 - proportionhunter))/2 + groupForced * proportionhunter
         return groupForced
 
     def arrive(self, target_pos, speed):
@@ -455,16 +479,104 @@ class Agent(object):
         return [totalVec, totalProportion]
 
     def UpdateHunterHidePositions(self):
+        self.hunterHidePositions = []
         for circle in Agent.world.walls:
-            self.hunterHidePositions.append((circle.pos - self.pos).normalise() * (self.pos.distance(circle.pos) + circle.radius + Agent.floatScale) + self.pos)
+            self.hunterHidePositions.append([(circle.pos - self.pos).normalise() * (self.pos.distance(circle.pos) + circle.radius + Agent.distanceFromEnvironment * Agent.floatScale) + self.pos, circle.radius])
 
     def AvoidEnvironmentForce(self):
         totalforce = Vector2D(0,0)
         for circle in Agent.world.walls:
-            edgeDistance = self.pos.distance(circle.pos) - circle.radius
+            #use position or position +velocity to determine additive force based on which of the two is closer
+            measerPosition = self.pos
+            if (self.pos + self.vel).distance(circle.pos) < self.pos.distance(circle.pos):
+                measerPosition = (self.pos + self.vel)
+
+            edgeDistance = measerPosition.distance(circle.pos) - circle.radius
             if edgeDistance < Agent.distanceFromEnvironment * Agent.floatScale:
                 if edgeDistance < 0:
                     edgeDistance = 0
                 proportion = 1 - (edgeDistance / (Agent.distanceFromEnvironment * Agent.floatScale))
                 totalforce += (self.pos - circle.pos).normalise() * Agent.max_speed * Agent.floatScale * proportion
         return totalforce
+    def AvoidEnvironmentRedirect(self, force):
+        totalforce = Vector2D(0,0)
+        found = False
+        for circle in Agent.world.walls:
+            if (self.pos + force).distance(circle.pos) < circle.radius or self.pos.distance(circle.pos) < circle.radius + (Agent.distanceFromEnvironment * Agent.floatScale) or (self.pos + self.vel).distance(circle.pos) < circle.radius:
+                perpendicular = (circle.pos - self.pos).get_normalised().perp()
+                side = circle.pos + perpendicular * circle.radius
+                sideneg = circle.pos + ((-perpendicular) * circle.radius)
+                newforcedPosition = (self.pos + force.get_normalised() * (circle.pos.distance(self.pos) + circle.radius))
+                if self.find_intersection((circle.pos), (side), (self.pos), (newforcedPosition)):
+                    toadd = (side - self.pos).get_normalised() * force.length()
+                    totalforce += toadd
+                    '''egi.orange_pen()
+                    egi.line_by_pos(self.pos, self.pos + force)
+                    egi.line_by_pos(self.pos, self.pos + toadd)'''
+                    found = True
+                elif self.find_intersection((circle.pos), (sideneg), (self.pos), (newforcedPosition)):
+                    toadd = (sideneg - self.pos).get_normalised() * force.length()
+                    totalforce += toadd
+                    '''egi.orange_pen()
+                    egi.line_by_pos(self.pos,self.pos + force)
+                    egi.line_by_pos(self.pos,self.pos + toadd)'''
+                    found = True
+        if found:
+            print("found %s" % str(totalforce))
+            #Agent.world.paused = True
+            return totalforce
+        return force
+
+    def HideFromHunter(self): #NOTE: UNPROPORTIONAL
+        #measure proportional distance to hunter
+        closestHidePos = None
+        closestHidePosDist = 9999999999999999999999
+        allocated = False
+        for hidepos in Agent.world.hunter.hunterHidePositions:
+            hideposDis = hidepos[0].distance(self.pos)
+            if hideposDis < closestHidePosDist:
+                closestHidePos = hidepos
+                closestHidePosDist = hideposDis
+                allocated = True
+        if allocated:
+            proportion = closestHidePosDist / closestHidePos[1]
+            if proportion > 1:
+                proportion = 1
+            return [self.arrive(closestHidePos[0], 'normal'), proportion]#(closestHidePos - self.pos).normalise() * Agent.max_speed * Agent.floatScale
+        return False
+
+    def find_intersection(self, p0, p1, p2, p3 ) :
+
+        s10_x = p1.x - p0.x
+        s10_y = p1.y - p0.y
+        s32_x = p3.x - p2.x
+        s32_y = p3.y - p2.y
+
+        denom = s10_x * s32_y - s32_x * s10_y
+
+        if denom == 0 : return None # collinear
+
+        denom_is_positive = denom > 0
+
+        s02_x = p0.x - p2.x
+        s02_y = p0.y - p2.y
+
+        s_numer = s10_x * s02_y - s10_y * s02_x
+
+        if (s_numer < 0) == denom_is_positive : return False # no collision
+
+        t_numer = s32_x * s02_y - s32_y * s02_x
+
+        if (t_numer < 0) == denom_is_positive : return False # no collision
+
+        if (s_numer > denom) == denom_is_positive or (t_numer > denom) == denom_is_positive : return False # no collision
+
+
+        # collision detected
+
+        #t = t_numer / denom
+
+        #intersection_point = [ p0[0] + (t * s10_x), p0[1] + (t * s10_y) ]
+
+
+        return True

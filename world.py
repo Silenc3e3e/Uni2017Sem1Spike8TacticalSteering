@@ -29,6 +29,7 @@ class World(object):
     def update(self, delta):
         if not self.paused or self.next:
             self.next = False
+            self.hunter.UpdateHunterHidePositions()
             for agent in self.agents:
                 agent.update(delta)
 
