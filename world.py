@@ -7,6 +7,8 @@ Created for COS30002 AI for Games by Clinton Woodward cwoodward@swin.edu.au
 from vector2d import Vector2D
 from matrix33 import Matrix33
 from graphics import egi
+from random import random, randrange, uniform, randint
+from circularwall import CircularWall
 
 
 class World(object):
@@ -21,6 +23,9 @@ class World(object):
         self.showinfo = True
         self.inputgroup = 0
 
+        self.walls = []
+        self.RandomizeWalls()
+
     def update(self, delta):
         if not self.paused or self.next:
             self.next = False
@@ -34,6 +39,9 @@ class World(object):
         if self.target:
             egi.red_pen()
             egi.cross(self.target, 10)
+
+        for wall in self.walls:
+            wall.render()
 
         if self.showinfo:
             infotext = ', '.join(set(agent.mode for agent in self.agents))
@@ -87,3 +95,14 @@ class World(object):
 
 
 
+    def RandomizeWalls(self):
+        self.walls = []
+        wallnum = randint(1, 6)
+
+        self.walls.append(CircularWall(150,Vector2D(500, 500)))
+        self.walls.append(CircularWall(120,Vector2D(1000, 600)))
+
+        '''while wallnum > 0:
+            wallnum -= 1
+
+            self.walls.append(CircularWall(uniform(),Vector2D(randrange(Agent.world.cx), randrange(Agent.world.cy))))'''

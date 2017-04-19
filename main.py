@@ -11,6 +11,7 @@ from pyglet.gl import *
 from vector2d import Vector2D
 from world import World
 from agent import Agent, AGENT_MODES  # Agent with seek, arrive, flee and pursuit
+from circularwall import CircularWall
 
 def on_mouse_press(x, y, button, modifiers):
     if button == 1:  # left

@@ -45,7 +45,8 @@ class Agent(object):
     max_force = 50.0
 
     #flee information
-    panicDist = 35
+    panicDist = 10
+    hiderange = 35
 
     #wander variables
     wander_dist = 8.25
@@ -83,7 +84,7 @@ class Agent(object):
     seperationRange = 3
     alignmentRange = 6
 
-    distanceFromWall = 10
+    distanceFromEnvironment = 3
     
     # debug draw info?
     show_info = False
@@ -109,6 +110,7 @@ class Agent(object):
 
         self.hunterTargVec = Vector2D(10,10)
         self.hunterTarg = None
+        self.hunterHidePositions = []
 
         # NEW WANDER INFO
         self.wander_target = Vector2D(1, 0)
@@ -169,6 +171,7 @@ class Agent(object):
             force = self.groupForce(delta)
         else:
             force = self.groupForce(delta)
+        force += self.AvoidEnvironmentForce() #additive avoid walls
         forcewindow = self.windowEdge()
         if forcewindow[1] > 0:
             #print ("forcewindow %s prop = %s" % (str(forcewindow[0]) , str(forcewindow[1])))
@@ -299,6 +302,7 @@ class Agent(object):
             proportion = hunterDist / scaledPanicDist
 
             return (desired_vel * (1 - proportion) + groupForced * (proportion))
+
         return groupForced
 
     def arrive(self, target_pos, speed):
@@ -417,7 +421,7 @@ class Agent(object):
 
     def windowEdge(self):
         totalVec = Vector2D(0,0)
-        scaleddist = Agent.distanceFromWall * Agent.floatScale
+        scaleddist = Agent.distanceFromEnvironment * Agent.floatScale
         totalProportion = 0
         futurePos = self.pos + self.vel
         
@@ -449,3 +453,18 @@ class Agent(object):
             totalProportion = max(proportion, totalProportion)
             totalVec += Vector2D(0,-1) * Agent.max_speed * Agent.floatScale * proportion
         return [totalVec, totalProportion]
+
+    def UpdateHunterHidePositions(self):
+        for circle in Agent.world.walls:
+            self.hunterHidePositions.append((circle.pos - self.pos).normalise() * (self.pos.distance(circle.pos) + circle.radius + Agent.floatScale) + self.pos)
+
+    def AvoidEnvironmentForce(self):
+        totalforce = Vector2D(0,0)
+        for circle in Agent.world.walls:
+            edgeDistance = self.pos.distance(circle.pos) - circle.radius
+            if edgeDistance < Agent.distanceFromEnvironment * Agent.floatScale:
+                if edgeDistance < 0:
+                    edgeDistance = 0
+                proportion = 1 - (edgeDistance / (Agent.distanceFromEnvironment * Agent.floatScale))
+                totalforce += (self.pos - circle.pos).normalise() * Agent.max_speed * Agent.floatScale * proportion
+        return totalforce
